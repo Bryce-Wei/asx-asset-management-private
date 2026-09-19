@@ -1,0 +1,4 @@
+ticker,base_weight,sentiment_adjustment,macro_adjustment,final_weight
+SYN_A,0.40,0.00,0.00,0.40
+SYN_B,0.35,0.00,0.00,0.35
+SYN_C,0.25,0.00,0.00,0.25

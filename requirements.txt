@@ -1,0 +1,12 @@
+# 以下依赖版本已在 Python 3.12 环境验证。
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.1
+matplotlib==3.8.4
+scikit-learn==1.4.2
+statsmodels==0.14.2
+openpyxl==3.1.2
+nltk==3.8.1
+
+# NLP 模块运行前需安装 VADER 词典：python -m nltk.downloader vader_lexicon
+# ARIMA 为可选实验，额外依赖见 experiments/requirements.txt。

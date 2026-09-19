@@ -1,0 +1,2 @@
+-r ../requirements.txt
+pmdarima>=2.0.4
