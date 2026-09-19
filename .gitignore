@@ -1,0 +1,37 @@
+# 原始数据和运行结果仅保留在本地。
+/data/raw/
+/outputs/
+
+# 忽略本地环境、编译产物和缓存。
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+build/
+dist/
+
+# 忽略编辑器、操作系统和日志文件。
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# 本地凭据、环境变量和压缩包不提交。
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets.json
+*.zip
