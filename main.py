@@ -1,4 +1,4 @@
-"""执行完整资产管理分析流程，也支持使用模拟数据运行演示。"""
+"""执行完整资产管理分析流程，支持按月滚动回测，也支持使用模拟数据运行演示。"""
 from __future__ import annotations
 
 import argparse
@@ -83,25 +83,54 @@ def run_full(data_dir: Path, output_dir: Path, risk_level: int | None = None) ->
             "files": [str(p) for p in files]}
 
 
+def run_backtest(data_dir: Path, output_dir: Path, risk_level: int | None = None) -> dict:
+    """按月滚动回测完整配置流程，每期只使用信号日当时可获得的数据。
+
+    读取与完整模式相同的原始输入；每个月末重新优化基础组合并计算情绪、
+    宏观调整，按设定的成交滞后与交易成本模拟每日净值。同时输出等权、
+    仅基础组合、仅加情绪、仅加宏观和完整策略五个版本，用于判断各调整
+    分量是否带来增益。回测参数见 backtest.DEFAULT_SETTINGS，可在
+    config.SETTINGS 中覆盖。返回回测区间、各版本绩效和生成文件路径。
+    """
+    from asset_management import backtest
+
+    settings = dict(SETTINGS)
+    if risk_level is not None:
+        settings["selected_risk_level"] = risk_level
+    result = backtest.run_backtest(load_inputs(data_dir), settings)
+    files = save_reports(result["tables"], output_dir, mode="backtest")
+    # NaN 转为 JSON null，避免输出非标准 JSON。
+    metrics = result["metrics"].round(6).astype(object)
+    metrics = metrics.where(metrics.notna(), None).to_dict(orient="index")
+    return {"mode": "backtest", "description": "按月滚动、逐期截取当时可得数据的历史回测。",
+            "risk_level": settings["selected_risk_level"], **result["summary"],
+            "metrics": metrics, "files": [str(p) for p in files]}
+
+
 def main(argv: list[str] | None = None) -> int:
     """解析命令行参数、选择运行模式并写出机器可读的运行摘要。
 
-    完整模式默认输出到 ``outputs``，演示模式默认输出到其 ``demo``
-    子目录；指定 ``--output-dir`` 时两种模式都使用该显式路径。
+    完整模式默认输出到 ``outputs``，演示和回测模式默认输出到其 ``demo``、
+    ``backtest`` 子目录；指定 ``--output-dir`` 时各模式都使用该显式路径。
     分析失败时将错误写到标准错误并返回 1；成功时保存 UTF-8 JSON，
     同时在标准输出打印摘要并返回 0，便于终端或外部脚本判断结果。
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("demo", "full"), default="full", help="运行模式，默认执行完整分析")
-    parser.add_argument("--data-dir", type=Path, default=RAW_DIR, help="完整分析的原始数据目录")
+    parser.add_argument("--mode", choices=("demo", "full", "backtest"), default="full",
+                        help="运行模式，默认执行完整分析；backtest 为按月滚动回测")
+    parser.add_argument("--data-dir", type=Path, default=RAW_DIR, help="完整分析与回测的原始数据目录")
     parser.add_argument("--sample-dir", type=Path, default=SAMPLE_DIR, help="演示数据目录")
     parser.add_argument("--output-dir", type=Path, default=None, help="结果输出目录，完整模式默认为 outputs")
     parser.add_argument("--risk-level", type=int, choices=(1, 2, 3), default=None, help="覆盖配置中的风险等级：1、2 或 3")
     args = parser.parse_args(argv)
-    output_dir = args.output_dir or (OUTPUT_DIR / "demo" if args.mode == "demo" else OUTPUT_DIR)
+    output_dir = args.output_dir or (OUTPUT_DIR / args.mode if args.mode != "full" else OUTPUT_DIR)
     try:
-        result = (run_demo(args.sample_dir, output_dir) if args.mode == "demo"
-                  else run_full(args.data_dir, output_dir, args.risk_level))
+        if args.mode == "demo":
+            result = run_demo(args.sample_dir, output_dir)
+        elif args.mode == "backtest":
+            result = run_backtest(args.data_dir, output_dir, args.risk_level)
+        else:
+            result = run_full(args.data_dir, output_dir, args.risk_level)
     except (OSError, ValueError, RuntimeError, ImportError, LookupError) as exc:
         print(f"无法完成 {args.mode} 模式：{exc}", file=sys.stderr)
         return 1

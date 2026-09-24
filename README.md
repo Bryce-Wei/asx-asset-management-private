@@ -1,10 +1,10 @@
 # ASX Asset Management
 
-我在这个私有仓库中保留完整的资产管理研究代码，包括蒙特卡洛组合模拟、投资组合优化、新闻情绪分析和宏观经济调整。我将数据读取、特征工程、客户分群、组合分析和结果输出整理为独立模块。
+我在这个私有仓库中保留完整的资产管理研究代码，包括蒙特卡洛组合模拟、投资组合优化、新闻情绪分析、宏观经济调整，以及逐期只使用当时可得数据的按月滚动回测。我将数据读取、特征工程、客户分群、组合分析和结果输出整理为独立模块。
 
 下面是我的完整中文项目报告，包含原有的全部 16 张图片和 4 处批注。我保留早期研究的内容，并用“研究说明”区分当时的判断与当前解释。
 
-[中文报告 PDF](docs/project-summary-zh.pdf) · [中文版报告 Markdown](docs/project-summary-zh.md) · [原始报告 PDF](docs/project-summary.pdf) · [运行方法](#运行方法) · [项目结构](#项目结构)
+[中文报告 PDF](docs/project-summary-zh.pdf) · [中文版报告 Markdown](docs/project-summary-zh.md) · [原始报告 PDF](docs/project-summary.pdf) · [运行方法](#运行方法) · [滚动回测](#滚动回测) · [项目结构](#项目结构)
 
 ## 项目分析报告 A 部分
 
@@ -421,6 +421,14 @@ python main.py --mode full
 
 我把结果表保存到 `outputs/tables/`，把分析图保存到 `outputs/figures/`。文件路径、随机种子、模拟次数和风险参数集中在 `config.py` 中。
 
+我用按月滚动回测检验这套配置规则的历史表现，每期只使用当时可获得的数据，结果写入 `outputs/backtest/`：
+
+```bash
+python main.py --mode backtest
+```
+
+信息截止规则、对比版本、输出文件和参数见下方的[滚动回测](#滚动回测)。
+
 没有原始数据时，我用仓库内的模拟数据检查读取、权重校验和报告输出：
 
 ```bash
@@ -439,6 +447,71 @@ python -m unittest discover -s tests -v
 python -m pip install -r experiments/requirements.txt
 python experiments/arima_forecast.py --help
 ```
+
+## 滚动回测
+
+我用按月滚动回测检验这套配置规则在历史上逐月执行的效果。每个月最后一个交易日为信号日：我只把当时已经可以获得的数据交给模型，重新优化基础组合、计算情绪与宏观调整，在下一个交易日收盘成交，然后按日跟踪净值，直到下一次调仓。实现位于 `asset_management/backtest.py`。
+
+### 信息截止规则
+
+| 数据 | 信号日可以使用的范围 |
+|---|---|
+| 股票价格 | 不晚于信号日的收盘价；组合优化使用最近 504 个交易日收益 |
+| 新闻标题 | 解析 `Date/Time`，只使用不晚于信号日当地 16:00（ASX 收盘）的标题，并在每只股票内按时间由新到旧排列 |
+| 宏观指标 | 按 2 个月的发布滞后近似：6 月底只能使用 4 月及以前的指标；宏观回归使用最近 36 个月 |
+| 成交 | 信号日收盘后形成信号，下一个交易日收盘成交；成交日当天的涨跌仍归属原持仓 |
+| 交易成本 | 单边 10 个基点，乘以换手（各股票目标权重与当前权重之差的绝对值之和） |
+
+蒙特卡洛模拟和客户分群不影响权重，回测中不运行。基础组合优化失败的月份沿用原持仓；情绪或宏观调整因数据不足无法计算时按零调整处理，并逐期记录原因。
+
+### 对比版本
+
+| 版本 | 构成 |
+|---|---|
+| `equal_weight` | 每期等权，不依赖任何模型，作为基准 |
+| `base` | 仅使用组合优化得到的基础权重 |
+| `base_sentiment` | 基础权重 + 新闻情绪调整 |
+| `base_macro` | 基础权重 + 宏观调整 |
+| `full` | 基础权重 + 情绪调整 + 宏观调整，即完整策略 |
+
+五个版本使用相同的调仓日期、成交规则和成本。`base` 与 `equal_weight` 的差异反映组合优化的作用，`base_sentiment`、`base_macro` 与 `base` 的差异分别反映两类调整的贡献。
+
+### 输出结果
+
+结果默认写入 `outputs/backtest/`：
+
+| 文件 | 内容 |
+|---|---|
+| `tables/backtest_metrics.csv` | 各版本的总收益、复合年化收益、年化波动、夏普比率、最大回撤、换手、成本拖累，以及相对等权组合的超额收益和信息比率 |
+| `tables/backtest_nav.csv` | 各版本每日净值，初始资金为 1 |
+| `tables/backtest_weights.csv` | 每期各版本的目标权重 |
+| `tables/backtest_signals.csv` | 每期每只股票的基础权重、情绪调整和宏观调整 |
+| `tables/backtest_periods.csv` | 每期价格、新闻和宏观数据的截止时点及各分量状态，用于核对是否使用了未来数据 |
+| `tables/backtest_rebalances.csv` | 每期每个版本是调仓还是沿用原持仓，以及换手和成本 |
+| `figures/backtest_nav.png`、`figures/backtest_drawdown.png` | 各版本的净值与回撤对比 |
+| `run_summary.json` | 回测区间、参数、两类调整实际生效的期数（`overlay_coverage`）和绩效摘要 |
+
+### 主要参数
+
+默认值位于 `asset_management/backtest.py` 的 `DEFAULT_SETTINGS`，可以在 `config.py` 的 `SETTINGS` 中覆盖：
+
+| 参数 | 默认值 | 含义 |
+|---|---|---|
+| `backtest_lookback_days` | `504` | 组合优化使用的最近交易日收益个数；`None` 表示使用全部历史 |
+| `backtest_execution_lag_days` | `1` | 信号日之后第几个交易日收盘成交 |
+| `backtest_cost_bps` | `10.0` | 单边交易成本（基点） |
+| `backtest_risk_free_rate` | `0.0` | 计算夏普比率时扣除的年化无风险利率 |
+| `backtest_macro_release_lag_months` | `2` | 宏观指标的发布滞后月数 |
+| `backtest_macro_window_months` | `36` | 宏观回归使用的最近月份数 |
+| `backtest_news_cutoff` | `"16:00"` | 新闻可用的截止时刻（悉尼时间） |
+| `news_datetime_format` | `None` | 新闻时间格式；默认先按 ISO 8601 解析，失败后再按日在前的澳洲格式解析 |
+| `backtest_start`、`backtest_end` | `None` | 可选的回测起止日期 |
+
+### 解读与局限
+
+我先查看 `run_summary.json` 中的 `overlay_coverage`：如果新闻只覆盖很短的时间，情绪调整在多数月份为零，`base_sentiment` 与 `base` 的比较就没有意义。`tests/test_backtest.py` 篡改信号日之后的价格、新闻和尚未发布的指标，验证当期信号完全不变。
+
+回测只消除计算过程中的前视偏差，无法修正数据本身的偏差：`PX_LAST` 不含分红，会低估银行股等高股息股票；固定的 10 只股票如果按期末市值选出，仍有事后选股偏差；宏观指标使用最终修订值，统一的发布滞后只是近似；做空没有计入借券成本。详细说明见[方法与限制](docs/methodology.md#滚动回测)。
 
 ## 项目结构
 
@@ -460,6 +533,7 @@ asx-asset-management/
 │   ├── sentiment.py                # 新闻情绪评分与调整
 │   ├── macro.py                    # 宏观回归与调整
 │   ├── allocation.py               # 合并调整与生成最终权重
+│   ├── backtest.py                 # 按月滚动回测与绩效评估
 │   └── reporting.py                # 保存结果表与分析图
 ├── data/
 │   ├── README.md                   # 数据来源、字段与放置方法
@@ -474,7 +548,8 @@ asx-asset-management/
 │   └── requirements.txt
 ├── outputs/                        # 运行生成，默认不提交
 │   ├── tables/
-│   └── figures/
+│   ├── figures/
+│   └── backtest/                   # 滚动回测的表格、图表与运行摘要
 ├── docs/
 │   ├── methodology.md             # 方法、假设与局限
 │   ├── project-summary.pdf         # 原始英文项目报告
@@ -484,6 +559,7 @@ asx-asset-management/
 └── tests/
     ├── test_features.py            # 收益、日期与股票对齐
     ├── test_allocation.py          # 权重合计与配置约束
+    ├── test_backtest.py            # 回测信息截止、调仓时点与净值计算
     ├── test_macro.py               # 月度价格与宏观数据对齐
     └── test_models.py              # 蒙特卡洛模拟与新闻情绪回归检查
 ```
