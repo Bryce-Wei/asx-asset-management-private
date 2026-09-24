@@ -28,8 +28,9 @@ def combine_weights(base, sentiment_adjustments, macro_adjustments, settings):
 
     公式为 a_i = 基础权重_i + 情绪调整_i + 宏观调整_i，随后
     w_i = a_i / Σa_i，最后按指定精度取整。归一化只处理总预算，
-    不保证权重非负；分母为负时还会反转全部符号。分母很小但非零时
-    权重可能被显著放大，函数不会自动更改策略规则，需检查返回结果。
+    不保证权重非负。分母为零或负数时直接报错：负分母会反转全部符号，
+    使调整后最差的股票得到最大权重，而结果仍能通过合计与非负检查。
+    分母为正但很小时权重可能被显著放大，需检查返回结果。
     """
     cfg = {**DEFAULT_SETTINGS, **settings}
     if not isinstance(base, pd.Series) or base.empty or not base.index.is_unique:
@@ -52,8 +53,11 @@ def combine_weights(base, sentiment_adjustments, macro_adjustments, settings):
     # 每列均为小数尺度的权重或调整量，先叠加再按所有股票的合计缩放。
     combined = frame.sum(axis=1)
     denominator = float(combined.sum())
-    if not np.isfinite(denominator) or denominator == 0:
-        raise ValueError("Combined weights have a zero or non-finite sum; cannot normalize.")
+    if not np.isfinite(denominator) or denominator <= 0:
+        raise ValueError(
+            f"Combined weights sum to {denominator:.6g}; normalizing a zero, negative or "
+            "non-finite total would invert or break the allocation."
+        )
     # 逐只股票取整会使合计略偏离 1；不把差额强制加到某一只股票上。
     frame["final_weight"] = (combined / denominator).round(int(cfg["final_weight_decimals"]))
     if not np.isfinite(frame["final_weight"].to_numpy()).all():

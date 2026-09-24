@@ -35,10 +35,11 @@ def save_reports(
     综合分。缺少对应结果时跳过该图，不补算模型或构造替代结果。
 
     演示模式只展示传入配置与价格，并注明模拟数据和固定示例权重；
-    完整模式还可展示模拟组合、前沿、客户分群和新闻情绪。
+    完整模式还可展示模拟组合、前沿、客户分群和新闻情绪。回测模式读取
+    backtest_nav（日期 × 策略版本的净值），绘制净值与回撤对比图。
     """
-    if mode not in {"demo", "full"}:
-        raise ValueError("mode must be 'demo' or 'full'")
+    if mode not in {"demo", "full", "backtest"}:
+        raise ValueError("mode must be 'demo', 'full' or 'backtest'")
     for name, frame in tables.items():
         # 限制键的字符集合，防止文件名意外包含路径分隔符或目录跳转。
         if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
@@ -58,11 +59,12 @@ def save_reports(
         frame.to_csv(target, encoding="utf-8-sig", index=True)
         saved.append(target)
 
-    note = (
-        "DEMO | Synthetic data and fixed illustrative weights."
-        if mode == "demo"
-        else "FULL | Local analysis output; interpretation depends on input data and assumptions."
-    )
+    note = {
+        "demo": "DEMO | Synthetic data and fixed illustrative weights.",
+        "full": "FULL | Local analysis output; interpretation depends on input data and assumptions.",
+        "backtest": "BACKTEST | Monthly point-in-time walk-forward; price-only returns, "
+                    "costs and lags as configured.",
+    }[mode]
 
     def finish(fig: plt.Figure, filename: str) -> None:
         """统一添加模式说明和边距，保存图像并释放图形资源。"""
@@ -198,5 +200,32 @@ def save_reports(
                 ax.grid(axis="y", color="#E5EAF0")
                 ax.spines[["top", "right"]].set_visible(False)
                 finish(fig, "sentiment.png")
+
+    nav = tables.get("backtest_nav")
+    if mode == "backtest" and nav is not None and not nav.empty:
+        # 等权基准用虚线，完整策略加粗，其余版本依次取色，便于比较各调整分量的贡献。
+        palette = iter(["#273B58", "#8A6FB0", "#C66A54", "#5B8C5A", "#B08A3E"])
+        styles = {
+            name: {"color": "#93ACBC", "linestyle": "--", "linewidth": 1.6} if name == "equal_weight"
+            else {"color": "#267F86", "linewidth": 2.4} if name == "full"
+            else {"color": next(palette, "#526175"), "linewidth": 1.4}
+            for name in nav.columns
+        }
+        for filename, frame, ylabel, title in (
+            ("backtest_nav.png", nav, "Net asset value (start = 1)", "Walk-forward backtest: net asset value"),
+            ("backtest_drawdown.png", nav / nav.cummax() - 1.0, "Drawdown from previous peak",
+             "Walk-forward backtest: drawdown"),
+        ):
+            fig, ax = plt.subplots(figsize=(9.5, 5.2))
+            for name in frame.columns:
+                ax.plot(frame.index, frame[name], label=name, **styles[name])
+            if filename == "backtest_drawdown.png":
+                ax.yaxis.set_major_formatter(PercentFormatter(1))
+            ax.set_ylabel(ylabel)
+            ax.set_title(title, loc="left", fontweight="bold", pad=16)
+            ax.grid(color="#E5EAF0")
+            ax.spines[["top", "right"]].set_visible(False)
+            ax.legend(fontsize=8, frameon=False, loc="best")
+            finish(fig, filename)
 
     return saved
