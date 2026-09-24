@@ -58,6 +58,12 @@ class AllocationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             combine_weights(self.base, -self.base, self.zero, {})
 
+    def test_negative_total_is_rejected_instead_of_inverting_ranking(self):
+        """合计为负时归一化会反转排序，且结果仍能通过合计与非负检查，因此必须报错。"""
+        adjustment = pd.Series([-0.5, -0.5, -0.3], index=self.base.index)
+        with self.assertRaisesRegex(ValueError, "negative"):
+            combine_weights(self.base, self.zero, adjustment, {})
+
     def test_negative_weights_are_reported_without_silent_clipping(self):
         """加法调整可产生空头；检查应报告负权重，同时保留合计约束。"""
         adjustment = pd.Series([-0.5, 0.5, 0.0], index=self.base.index)
